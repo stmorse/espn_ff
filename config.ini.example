@@ -1,0 +1,19 @@
+# Copy this file to config.ini and fill it in.  config.ini is gitignored.
+#
+# Cookies are only needed for PRIVATE leagues.  If your league is public,
+# leave swid/espn_s2 blank and everything still works.
+#
+# To find them: log into fantasy.espn.com in Chrome, open DevTools
+# (Cmd-Opt-I) > Application > Cookies > https://fantasy.espn.com, and copy
+# the values of the "SWID" and "espn_s2" cookies.  SWID includes the braces.
+#
+# These are session cookies and expire every so often -- if requests start
+# failing with 401, refresh them here.
+
+[espn]
+swid =
+espn_s2 =
+
+# Defaults for the scripts.  Every script can override these with CLI flags.
+league_id =
+season = 2025

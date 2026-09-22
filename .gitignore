@@ -1,0 +1,16 @@
+# credentials — never commit
+config.ini
+
+# cached API responses
+.cache/
+
+# generated charts
+output/
+
+# python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.ipynb_checkpoints/
