@@ -69,6 +69,7 @@ without editing anything.
 |---|---|
 | `luck_chart.py` | Real win % vs. "what if you played every team every week" -- who's good and who's just been handed a soft schedule |
 | `proj_vs_actual.py` | Projected vs. actual points, one facet per position -- how much ESPN's weekly projections are worth |
+| `lineup_efficiency.py` | What you scored vs. what ESPN's lineup would have scored vs. the best your roster could have done |
 
 ![projections](docs/example_projections.png)
 
@@ -94,6 +95,34 @@ Two things worth knowing about how it counts:
   different kind from "played and underperformed," and they show up as a
   band along the bottom of each facet. Use `--started-only` to see just the
   players managers actually trusted that week.
+
+![lineups](docs/example_lineups.png)
+
+<sub>Example output, generated from a synthetic league.</sub>
+
+```bash
+python scripts/lineup_efficiency.py
+python scripts/lineup_efficiency.py --start-week 1 --end-week 6 --theme dark
+```
+
+Every team is measured against **its own** ceiling, so the bars compare
+managers rather than rosters. Three things go into each row:
+
+- **The lineup you set** -- what your starters really scored.
+- **ESPN's projected best** -- the lineup ESPN's projections recommended,
+  scored by what those players actually did.
+- **Your roster's ceiling** -- the most your roster could have scored that
+  week. It's pure hindsight, so nobody reaches it; the gap is the point.
+
+The best lineup is found by solving an assignment problem over the
+league's real lineup slots and each player's `eligibleSlots`, so it's
+exact for superflex, two-QB, multi-flex and other odd formats -- not just
+the standard QB/RB/WR/TE/FLEX shape.
+
+Note that ranking by raw points left on the bench mixes in roster
+strength: a weak roster leaves fewer points behind at the same level of
+skill. The printed table includes `captured` (actual as a share of the
+ceiling), which is the fairer manager-to-manager comparison.
 
 ## Using it from a notebook
 
@@ -121,6 +150,7 @@ league.teams()          # one row per team: record, points, final rank
 league.schedule()       # one row per matchup, all season, scores included
 league.rosters(week=3)  # every rostered player, projected vs. actual points
 league.rosters_range(range(1, 10))   # several weeks, stacked
+league.lineup_slots()   # the league's starting slots, from its settings
 league.raw(["mTeam"])   # raw JSON, for anything the above doesn't cover
 ```
 
@@ -136,6 +166,9 @@ analysis.weekly_scores(schedule)             # one row per team per week
 analysis.team_games(schedule, team_id=4)     # one team's season, their POV
 analysis.projection_accuracy(rosters)        # r2 / bias / MAE per position
 analysis.projection_error(rosters)           # the filtered rows behind it
+analysis.lineup_efficiency(rosters, slots)   # actual/ESPN/best, per team-week
+analysis.season_efficiency(weekly)           # the same, summed over weeks
+analysis.best_lineup(players, slots, "actual")   # the exact best lineup
 ```
 
 ## Notes on the ESPN API
@@ -154,6 +187,9 @@ It's undocumented, so here's what this repo has learned the hard way:
   is their actual position. You almost always want the latter.
 - Roster data is per-week: you have to pass `scoringPeriodId` and make one
   request per week you want.
+- `player['eligibleSlots']` lists every slot a player may fill, and
+  `settings.rosterSettings.lineupSlotCounts` gives the league's starting
+  lineup. Between them you never need to hardcode a roster structure.
 - D/ST entries have no `injuryStatus` key at all, unlike every other player.
 - Leagues with an odd number of teams have bye matchups with only one side.
 

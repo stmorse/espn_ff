@@ -3,7 +3,7 @@
 import numpy as np
 import pandas as pd
 
-from .constants import WINNER_AWAY, WINNER_HOME, WINNER_TIE
+from .constants import SLOT_CODES, WINNER_AWAY, WINNER_HOME, WINNER_TIE
 
 
 def team_games(schedule: pd.DataFrame, team_id: int) -> pd.DataFrame:
@@ -221,3 +221,126 @@ def _slope(x, y) -> float:
     if len(x) < 2 or np.std(x) == 0:
         return float("nan")
     return float(np.polyfit(x, y, 1)[0])
+
+
+# --------------------------------------------------------------------
+# Lineup efficiency: what you scored, what ESPN's advice would have
+# scored, and the best you could have done knowing the results.
+# --------------------------------------------------------------------
+
+INELIGIBLE = -1e6
+
+
+def best_lineup(players: pd.DataFrame, slot_counts: dict, rank_by: str):
+    """Pick the highest-scoring legal lineup, ranking players by `rank_by`.
+
+    This is an assignment problem -- each starting slot takes one player,
+    each player fills at most one slot, and players are only eligible for
+    certain slots -- so it's solved exactly rather than greedily.  Greedy
+    position-by-position filling gets the common QB/RB/WR/TE/FLEX case
+    right but quietly breaks on superflex and multi-flex leagues.
+
+    Returns (chosen_rows, total_actual_points).  Ranking by "actual"
+    gives the best possible lineup in hindsight; ranking by "projected"
+    gives the lineup ESPN's projections recommended.
+    """
+    from scipy.optimize import linear_sum_assignment
+
+    slots = [slot for slot, count in sorted(slot_counts.items())
+             for _ in range(count)]
+    if players.empty or not slots:
+        return players.iloc[:0], 0.0
+
+    scores = players[rank_by].fillna(0).to_numpy(dtype=float)
+    eligible = players["eligible_slots"].tolist()
+
+    value = np.full((len(players), len(slots)), INELIGIBLE)
+    for i, slots_for_player in enumerate(eligible):
+        for j, slot in enumerate(slots):
+            if slot in slots_for_player:
+                value[i, j] = scores[i]
+
+    rows, cols = linear_sum_assignment(value, maximize=True)
+    # Drop any pairing the solver only made because it had to fill a
+    # slot no eligible player was left for.
+    keep = [r for r, c in zip(rows, cols) if value[r, c] > INELIGIBLE]
+    chosen = players.iloc[keep]
+    return chosen, float(chosen["actual"].fillna(0).sum())
+
+
+def lineup_efficiency(
+    rosters: pd.DataFrame,
+    slot_counts: dict,
+    through_week: int | None = None,
+) -> pd.DataFrame:
+    """Per team per week: actual, ESPN-recommended, and best-possible points.
+
+    actual   -- what the manager's lineup really scored
+    espn     -- what they'd have scored starting ESPN's projected best
+    optimal  -- the most their roster could have scored that week
+
+    `optimal` is hindsight, so nobody should expect to hit it; the point
+    is the gap, and how much of that gap ESPN's advice would have closed.
+    """
+    table = rosters.copy()
+    if through_week is not None:
+        table = table[table["week"] <= through_week]
+    if table.empty:
+        raise ValueError("No roster data in that range.")
+    if "eligible_slots" not in table.columns:
+        raise ValueError(
+            "rosters is missing 'eligible_slots' -- re-fetch with "
+            "League.rosters(); cached data from an older version won't have it."
+        )
+
+    rows = []
+    for (week, team_id), players in table.groupby(["week", "team_id"]):
+        actual = float(
+            players.loc[players["started"], "actual"].fillna(0).sum()
+        )
+        _, espn = best_lineup(players, slot_counts, "projected")
+        _, optimal = best_lineup(players, slot_counts, "actual")
+        rows.append(
+            {
+                "week": week,
+                "team_id": team_id,
+                "team": players["team"].iloc[0],
+                "actual": actual,
+                "espn": espn,
+                "optimal": optimal,
+                "left_on_bench": optimal - actual,
+                "vs_espn": actual - espn,
+            }
+        )
+    return pd.DataFrame(rows).sort_values(["week", "team_id"], ignore_index=True)
+
+
+def season_efficiency(weekly: pd.DataFrame) -> pd.DataFrame:
+    """Sum `lineup_efficiency` over weeks, one row per team.
+
+    `captured` is the share of the roster's possible points the manager
+    actually got -- comparable across teams in a way raw points aren't.
+    """
+    table = (
+        weekly.groupby(["team_id", "team"], as_index=False)[
+            ["actual", "espn", "optimal"]
+        ]
+        .sum()
+    )
+    table["weeks"] = weekly.groupby(["team_id", "team"], as_index=False)[
+        "week"
+    ].count()["week"]
+    table["left_on_bench"] = table["optimal"] - table["actual"]
+    table["vs_espn"] = table["actual"] - table["espn"]
+    table["captured"] = np.where(
+        table["optimal"] > 0, table["actual"] / table["optimal"], np.nan
+    )
+    table["espn_captured"] = np.where(
+        table["optimal"] > 0, table["espn"] / table["optimal"], np.nan
+    )
+    return table.sort_values("left_on_bench", ascending=False, ignore_index=True)
+
+
+def slot_label(slot_id: int) -> str:
+    """Human-readable name for a lineup slot id."""
+    return SLOT_CODES.get(slot_id, str(slot_id))

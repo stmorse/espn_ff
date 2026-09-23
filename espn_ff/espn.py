@@ -232,9 +232,27 @@ class League:
                         "status": player.get("injuryStatus", "NA"),
                         "projected": projected,
                         "actual": actual,
+                        # Which slots this player may legally fill --
+                        # what makes an exact best-lineup solve possible.
+                        "eligible_slots": tuple(player.get("eligibleSlots", ())),
                     }
                 )
         return pd.DataFrame(rows)
+
+    def lineup_slots(self, refresh: bool = False) -> dict[int, int]:
+        """The league's starting lineup: slot id -> how many of them.
+
+        Read from the league settings rather than hardcoded, so this
+        works for superflex, two-QB, six-flex and other odd formats.
+        Bench and IR are excluded -- they aren't starting slots.
+        """
+        data = self.raw(["mSettings"], refresh=refresh)
+        counts = data["settings"]["rosterSettings"]["lineupSlotCounts"]
+        return {
+            int(slot): int(count)
+            for slot, count in counts.items()
+            if int(count) > 0 and int(slot) in STARTER_SLOTS
+        }
 
     def rosters_range(self, weeks, refresh: bool = False) -> pd.DataFrame:
         """rosters() for several weeks, stacked.
